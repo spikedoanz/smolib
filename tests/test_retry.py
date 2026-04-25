@@ -1,107 +1,154 @@
 import pytest
-from smolib import retry, T
 
-no_wait = T.Wait.const(0)
+from smolib import T, retry
 
-async def ok_after(n: int, *, value=42):
-    """Return Pending n-1 times, then Ok."""
-    calls = 0
+P, O, E, X = T.Pending, T.Ok, T.Err, T.Exhausted
+
+
+def scripted(outcomes):
+    calls = []
+
     async def fn():
-        nonlocal calls; calls += 1
-        return T.Ok(value) if calls >= n else T.Pending(f"attempt {calls}")
-    return fn
+        i = len(calls)
+        calls.append(i + 1)
+        assert i < len(outcomes), "retry called fn after terminal outcome"
+        return outcomes[i]
 
-async def err_after(n: int, *, error="fatal"):
-    """Return Pending n-1 times, then Err."""
-    calls = 0
-    async def fn():
-        nonlocal calls; calls += 1
-        return T.Err(error) if calls >= n else T.Pending(f"attempt {calls}")
-    return fn
+    return fn, calls
 
-# core loop
 
-@pytest.mark.asyncio
-async def test_success_first_attempt():
-    result, attempts = await retry(await ok_after(1), n=3, wait=no_wait)
-    assert result == T.Ok(42)
-    assert attempts.k == 1
-    assert attempts.reasons == ()
+def record_wait_sleep(multiplier=10.0):
+    waits, sleeps = [], []
 
-@pytest.mark.asyncio
-async def test_success_after_retries():
-    result, attempts = await retry(await ok_after(3), n=5, wait=no_wait)
-    assert result == T.Ok(42)
-    assert attempts.k == 3
-    assert len(attempts.reasons) == 2
+    def wait(i):
+        waits.append(i)
+        return i * multiplier
 
-@pytest.mark.asyncio
-async def test_exhaustion():
-    result, attempts = await retry(await ok_after(99), n=3, wait=no_wait)
-    assert result == T.Err(T.Exhausted())
-    assert attempts.k == 3
-    assert len(attempts.reasons) == 3
+    async def sleep(seconds):
+        sleeps.append(seconds)
 
-@pytest.mark.asyncio
-async def test_err_stops_immediately():
-    result, attempts = await retry(await err_after(1), n=5, wait=no_wait)
-    assert result == T.Err("fatal")
-    assert attempts.k == 1
+    return wait, sleep, waits, sleeps
 
-@pytest.mark.asyncio
-async def test_err_after_pending():
-    result, attempts = await retry(await err_after(3), n=5, wait=no_wait)
-    assert result == T.Err("fatal")
-    assert attempts.k == 3
-    assert len(attempts.reasons) == 2
 
-@pytest.mark.asyncio
-async def test_n_must_be_positive():
-    with pytest.raises(ValueError):
-        await retry(await ok_after(1), n=0, wait=no_wait)
-
-# wait / timing
-
-@pytest.mark.asyncio
-async def test_wait_called_with_attempt_number():
-    waits = []
-    def record_wait(n): waits.append(n); return 0
-    await retry(await ok_after(4), n=5, wait=record_wait)
-    assert waits == [1, 2, 3]
-
-@pytest.mark.asyncio
-async def test_no_sleep_after_last_attempt():
+def clock_advances_on_sleep():
+    elapsed = 0.0
     sleeps = []
-    async def mock_sleep(t): sleeps.append(t)
-    await retry(await ok_after(99), n=3, wait=no_wait, sleep=mock_sleep)
-    assert len(sleeps) == 2  # not 3
 
+    def clock():
+        return elapsed
+
+    async def sleep(seconds):
+        nonlocal elapsed
+        sleeps.append(seconds)
+        elapsed += seconds
+
+    return clock, sleep, sleeps
+
+
+RETRY_CASES = [
+    pytest.param([O(42)], 3, O(42), 1, (), [], [], id="ok-first"),
+    pytest.param(
+        [P("attempt 1"), P("attempt 2"), O(42)],
+        5,
+        O(42),
+        3,
+        ("attempt 1", "attempt 2"),
+        [1, 2],
+        [10.0, 20.0],
+        id="ok-after-pending",
+    ),
+    pytest.param([E("fatal")], 5, E("fatal"), 1, (), [], [], id="err-first"),
+    pytest.param(
+        [P("attempt 1"), P("attempt 2"), E("fatal")],
+        5,
+        E("fatal"),
+        3,
+        ("attempt 1", "attempt 2"),
+        [1, 2],
+        [10.0, 20.0],
+        id="err-after-pending",
+    ),
+    pytest.param(
+        [P("attempt 1"), P("attempt 2"), P("attempt 3")],
+        3,
+        E(X()),
+        3,
+        ("attempt 1", "attempt 2", "attempt 3"),
+        [1, 2],
+        [10.0, 20.0],
+        id="exhausted",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    "outcomes,n,expected,k,reasons,expected_waits,expected_sleeps",
+    RETRY_CASES,
+)
 @pytest.mark.asyncio
-async def test_exp_backoff():
-    w = T.Wait.exp(base=2.0, cap=60.0)
-    assert w(1) == 2.0
-    assert w(2) == 4.0
-    assert w(10) == 60.0  # capped
+async def test_retry_state_machine(
+    outcomes, n, expected, k, reasons, expected_waits, expected_sleeps
+):
+    fn, fn_calls = scripted(outcomes)
+    wait, sleep, waits, sleeps = record_wait_sleep()
 
+    result, attempts = await retry(fn, n=n, wait=wait, sleep=sleep)
+
+    assert result == expected
+    assert attempts.k == k
+    assert attempts.reasons == reasons
+    assert fn_calls == list(range(1, k + 1))
+    assert waits == expected_waits
+    assert sleeps == expected_sleeps
+
+
+@pytest.mark.parametrize("n", [0, -1])
 @pytest.mark.asyncio
-async def test_jitter_bounds():
-    w = T.Wait.jitter(T.Wait.const(10))
-    values = [w(1) for _ in range(200)]
-    assert all(0 <= v <= 10 for v in values)
+async def test_invalid_n_validates_before_side_effects(n):
+    def fail_sync(*_):
+        raise AssertionError("sync side effect should not run")
 
-# metadata
+    async def fail_async(*_):
+        raise AssertionError("async side effect should not run")
 
+    with pytest.raises(ValueError, match="n must be >= 1"):
+        await retry(fail_async, n=n, wait=fail_sync, sleep=fail_async, clock=fail_sync)
+
+
+def test_exp_backoff_caps_values():
+    wait = T.Wait.exp(base=2.0, cap=60.0)
+    assert [wait(1), wait(2), wait(10)] == [2.0, 4.0, 60.0]
+
+
+def test_jitter_bounds():
+    wait = T.Wait.jitter(T.Wait.const(10))
+    assert all(0 <= wait(1) <= 10 for _ in range(200))
+
+
+ELAPSED_CASES = [
+    pytest.param([P("pending"), O("done")], 3, T.Wait.const(2.5), O("done"), [2.5], id="ok"),
+    pytest.param([P("pending"), E("fatal")], 3, T.Wait.const(4.0), E("fatal"), [4.0], id="err"),
+    pytest.param(
+        [P("attempt 1"), P("attempt 2"), P("attempt 3")],
+        3,
+        lambda i: float(i),
+        E(X()),
+        [1.0, 2.0],
+        id="exhausted",
+    ),
+]
+
+
+@pytest.mark.parametrize("outcomes,n,wait,expected,expected_sleeps", ELAPSED_CASES)
 @pytest.mark.asyncio
-async def test_elapsed_tracked():
-    tick = 0.0
-    def clock(): return tick
-    async def fn():
-        nonlocal tick; tick += 1.0
-        return T.Ok("done")
-    result, attempts = await retry(fn, n=3, wait=no_wait, clock=clock)
-    assert attempts.elapsed == 1.0
+async def test_elapsed_tracks_time_spent_sleeping(
+    outcomes, n, wait, expected, expected_sleeps
+):
+    fn, _ = scripted(outcomes)
+    clock, sleep, sleeps = clock_advances_on_sleep()
 
-@pytest.mark.asyncio
-async def test_reasons_collected():
-    result, attempts = await retry(await ok_after(4), n=5, wait=no_wait)
-    assert attempts.reasons == ("attempt 1", "attempt 2", "attempt 3")
+    result, attempts = await retry(fn, n=n, wait=wait, sleep=sleep, clock=clock)
+
+    assert result == expected
+    assert sleeps == expected_sleeps
+    assert attempts.elapsed == sum(expected_sleeps)
