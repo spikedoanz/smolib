@@ -51,17 +51,16 @@ def retry[R, E, T](
     if n < 1: raise ValueError("n must be >= 1")
     reasons: list[R] = []
     started: float = clock()
+    def attempts(k: int) -> Attempts[R]:
+        return Attempts(k=k, elapsed=clock() - started, reasons=tuple(reasons))
     for i in range(1, n + 1):
         result: Attempt[R, E, T] = fn()
-        # Called immediately -- closing over mutable `reasons` is safe.
-        def attemptor() -> Attempts[R]:
-            return Attempts(k=i, elapsed=clock() - started, reasons=tuple(reasons))
         match result:
-            case Ok(value=v):                        return Ok(v), attemptor()
-            case Err(error=e):                       return Err(e), attemptor()
+            case Ok(value=v):                        return Ok(v), attempts(i)
+            case Err(error=e):                       return Err(e), attempts(i)
             case Pending(reason=r):
                 reasons.append(r)
-                if i == n: return Exhausted(), attemptor()
+                if i == n: return Exhausted(), attempts(i)
                 sleep(wait(i))
     raise RuntimeError("unreachable") # python's type checker can't prove this.
 
@@ -77,15 +76,15 @@ async def aretry[R, E, T](
     if n < 1: raise ValueError("n must be >= 1")
     reasons: list[R] = []
     started: float = clock()
+    def attempts(k: int) -> Attempts[R]:
+        return Attempts(k=k, elapsed=clock() - started, reasons=tuple(reasons))
     for i in range(1, n + 1):
         result: Attempt[R, E, T] = await fn()
-        def attemptor() -> Attempts[R]:
-            return Attempts(k=i, elapsed=clock() - started, reasons=tuple(reasons))
         match result:
-            case Ok(value=v):                        return Ok(v), attemptor()
-            case Err(error=e):                       return Err(e), attemptor()
+            case Ok(value=v):                        return Ok(v), attempts(i)
+            case Err(error=e):                       return Err(e), attempts(i)
             case Pending(reason=r):
                 reasons.append(r)
-                if i == n: return Exhausted(), attemptor()
+                if i == n: return Exhausted(), attempts(i)
                 await sleep(wait(i))
     raise RuntimeError("unreachable") # python's type checker can't prove this.
