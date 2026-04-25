@@ -5,28 +5,44 @@ import time
 from smolib.types import Ok, Err, Pending, Exhausted, Wait, Result, Attempt, Attempts
 
 
-async def retry[R, E, T](
-    fn      : Callable[[], Awaitable[Attempt[R, E, T]]],
+def catch(fn, on=Exception):
+    """Caught exceptions become Pending (retryable). Uncaught propagate."""
+    def wrapped():
+        try: return Ok(fn())
+        except on as e: return Pending(e)
+    return wrapped
+
+
+def acatch(fn, on=Exception):
+    """Async version of catch."""
+    async def wrapped():
+        try: return Ok(await fn())
+        except on as e: return Pending(e)
+    return wrapped
+
+
+def retry[R, E, T](
+    fn      : Callable[[], Attempt[R, E, T]],
     n       : int,  # the children yearn for quantitative types
     wait    : Callable[[int], float]                = Wait.jitter(Wait.exp()),
-    sleep   : Callable[[float], Awaitable[None]]    = asyncio.sleep,
+    sleep   : Callable[[float], None]               = time.sleep,
     clock   : Callable[[], float]                   = time.monotonic,
-) -> tuple[Result[E | Exhausted, T], Attempts[R]]:
+) -> tuple[Result[E, T], Attempts[R]]:
     """
     Retry a potentially erroring | failing operation with backoff.
 
     ```
     from smolib import retry, t
 
-    async def flaky() -> t.Attempt[str, str, int]:
+    def flaky() -> t.Attempt[str, str, int]:
         if random.random() < 0.5: return t.Pending("not ready")
         return t.Ok(42)
 
-    result, attempts = await retry(flaky, n=5)
+    result, attempts = retry(flaky, n=5)
     match result:
         case t.Ok(value=v):
             print(f"got {v} after {attempts.k} attempts in {attempts.elapsed:.1f}s")
-        case t.Err(error=t.Exhausted()):
+        case t.Exhausted():
             print(f"gave up after {attempts.k} tries: {attempts.reasons}")
         case t.Err(error=e):
             print(f"fatal error: {e}")
@@ -36,7 +52,7 @@ async def retry[R, E, T](
     reasons: list[R] = []
     started: float = clock()
     for i in range(1, n + 1):
-        result: Attempt[R, E, T] = await fn()
+        result: Attempt[R, E, T] = fn()
         # Called immediately -- closing over mutable `reasons` is safe.
         def attemptor() -> Attempts[R]:
             return Attempts(k=i, elapsed=clock() - started, reasons=tuple(reasons))
@@ -45,6 +61,31 @@ async def retry[R, E, T](
             case Err(error=e):                       return Err(e), attemptor()
             case Pending(reason=r):
                 reasons.append(r)
-                if i == n: return Err(Exhausted()), attemptor()
+                if i == n: return Exhausted(), attemptor()
+                sleep(wait(i))
+    raise RuntimeError("unreachable") # python's type checker can't prove this.
+
+
+async def aretry[R, E, T](
+    fn      : Callable[[], Awaitable[Attempt[R, E, T]]],
+    n       : int,  # the children yearn for quantitative types
+    wait    : Callable[[int], float]                = Wait.jitter(Wait.exp()),
+    sleep   : Callable[[float], Awaitable[None]]    = asyncio.sleep,
+    clock   : Callable[[], float]                   = time.monotonic,
+) -> tuple[Result[E, T], Attempts[R]]:
+    """Async version of retry."""
+    if n < 1: raise ValueError("n must be >= 1")
+    reasons: list[R] = []
+    started: float = clock()
+    for i in range(1, n + 1):
+        result: Attempt[R, E, T] = await fn()
+        def attemptor() -> Attempts[R]:
+            return Attempts(k=i, elapsed=clock() - started, reasons=tuple(reasons))
+        match result:
+            case Ok(value=v):                        return Ok(v), attemptor()
+            case Err(error=e):                       return Err(e), attemptor()
+            case Pending(reason=r):
+                reasons.append(r)
+                if i == n: return Exhausted(), attemptor()
                 await sleep(wait(i))
     raise RuntimeError("unreachable") # python's type checker can't prove this.

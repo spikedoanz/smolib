@@ -11,13 +11,12 @@ class Err[E]: error: E
 @dataclass(frozen=True)
 class Pending[R]: reason: R # No side effect occurred, ok to retry.
 
-type Result[E, T] = Ok[T] | Err[E]
-
 @dataclass(frozen=True)
 class Exhausted:
     """ ran out of iterations """
 
-type Attempt[R, E, T]   = Pending[R] | Result[E, T]
+type Attempt[R, E, T] = Pending[R] | Ok[T] | Err[E]
+type Result[E, T]     = Ok[T] | Err[E] | Exhausted
 
 @dataclass(frozen=True)
 class Attempts[R]:
