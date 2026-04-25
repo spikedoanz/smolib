@@ -2,7 +2,7 @@ from typing import Awaitable, Callable
 import asyncio
 import time
 
-from smolib.T import Ok, Err, Pending, Exhausted, Wait, Result, Attempt, Attempts
+from smolib.types import Ok, Err, Pending, Exhausted, Wait, Result, Attempt, Attempts
 
 
 async def retry[R, E, T](
@@ -16,19 +16,19 @@ async def retry[R, E, T](
     Retry a potentially erroring | failing operation with backoff.
 
     ```
-    from smolib import retry, T
+    from smolib import retry, t
 
-    async def flaky() -> T.Attempt[str, str, int]:
-        if random.random() < 0.5: return T.Pending("not ready")
-        return T.Ok(42)
+    async def flaky() -> t.Attempt[str, str, int]:
+        if random.random() < 0.5: return t.Pending("not ready")
+        return t.Ok(42)
 
     result, attempts = await retry(flaky, n=5)
     match result:
-        case T.Ok(value=v):
+        case t.Ok(value=v):
             print(f"got {v} after {attempts.k} attempts in {attempts.elapsed:.1f}s")
-        case T.Err(error=T.Exhausted()):
+        case t.Err(error=t.Exhausted()):
             print(f"gave up after {attempts.k} tries: {attempts.reasons}")
-        case T.Err(error=e):
+        case t.Err(error=e):
             print(f"fatal error: {e}")
     ```
     """

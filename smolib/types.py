@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from random import Random
 from typing import Callable
 
 @dataclass(frozen=True)
@@ -35,6 +36,6 @@ class Wait:
     def linear(step: float) -> Callable[[int], float]:
         return lambda n: step * n
     @staticmethod
-    def jitter(strategy: Callable[[int], float]) -> Callable[[int], float]:
-        import random
-        return lambda n: random.uniform(0, strategy(n))
+    def jitter(strategy: Callable[[int], float], *, rng: Random = Random()) -> Callable[[int], float]:
+        """Full jitter: uniform(0, strategy(n)). Pass a seeded Random for determinism."""
+        return lambda n: rng.uniform(0, strategy(n))

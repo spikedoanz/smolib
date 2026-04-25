@@ -1,6 +1,6 @@
 """Circuit breaker as a composable wrapper around any retryable operation."""
 import asyncio, random, time
-from smolib import retry, T
+from smolib import retry, t
 
 class Breaker:
     """Trips open after `threshold` consecutive failures, resets after `cooldown` seconds."""
@@ -31,21 +31,21 @@ def with_breaker(breaker: Breaker, op):
     """Wrap an operation so the breaker is consulted before each attempt."""
     async def wrapped():
         if breaker.is_open():
-            return T.Err("breaker open")  # fatal — don't waste retry budget
+            return t.Err("breaker open")  # fatal — don't waste retry budget
         result = await op()
         match result:
-            case T.Ok():    breaker.record_success()
-            case T.Err():   breaker.record_failure()
-            case T.Pending(): breaker.record_failure()
+            case t.Ok():    breaker.record_success()
+            case t.Err():   breaker.record_failure()
+            case t.Pending(): breaker.record_failure()
         return result
     return wrapped
 
 # --- demo ---
 
-async def flaky_service() -> T.Attempt[str, str, str]:
+async def flaky_service() -> t.Attempt[str, str, str]:
     if random.random() < 0.4:
-        return T.Pending("service unavailable")
-    return T.Ok("response payload")
+        return t.Pending("service unavailable")
+    return t.Ok("response payload")
 
 async def main():
     breaker = Breaker(threshold=5, cooldown=2.0)
@@ -53,16 +53,16 @@ async def main():
     for i in range(5):
         result, attempts = await retry(
             with_breaker(breaker, flaky_service),
-            n=6, wait=T.Wait.const(0.5),
+            n=6, wait=t.Wait.const(0.5),
         )
         match result:
-            case T.Ok(value=v):
+            case t.Ok(value=v):
                 print(f"  call {i}: ok after {attempts.k} attempts")
-            case T.Err(error="breaker open"):
+            case t.Err(error="breaker open"):
                 print(f"  call {i}: breaker tripped, skipping")
-            case T.Err(error=T.Exhausted()):
+            case t.Err(error=t.Exhausted()):
                 print(f"  call {i}: exhausted ({attempts.reasons})")
-            case T.Err(error=e):
+            case t.Err(error=e):
                 print(f"  call {i}: fatal: {e}")
 
 if __name__ == "__main__":

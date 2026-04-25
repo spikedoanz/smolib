@@ -3,7 +3,7 @@
 No real time passes. No patching. No freezegun. Just functions.
 """
 import asyncio
-from smolib import retry, T
+from smolib import retry, t
 
 async def main():
     fake_time = 0.0
@@ -15,19 +15,19 @@ async def main():
         fake_time += d
 
     call_count = 0
-    async def op() -> T.Attempt[str, str, str]:
+    async def op() -> t.Attempt[str, str, str]:
         nonlocal call_count; call_count += 1
-        if call_count < 4: return T.Pending(f"try {call_count}")
-        return T.Ok("done")
+        if call_count < 4: return t.Pending(f"try {call_count}")
+        return t.Ok("done")
 
     result, attempts = await retry(
         op, n=5,
-        wait=T.Wait.exp(base=2.0, cap=60.0),  # deterministic, no jitter
+        wait=t.Wait.exp(base=2.0, cap=60.0),  # deterministic, no jitter
         sleep=fake_sleep,
         clock=lambda: fake_time,
     )
 
-    assert result == T.Ok("done")
+    assert result == t.Ok("done")
     assert attempts.k == 4
     assert attempts.reasons == ("try 1", "try 2", "try 3")
     assert sleeps == [2.0, 4.0, 8.0]  # exp backoff: 2^1, 2^2, 2^3

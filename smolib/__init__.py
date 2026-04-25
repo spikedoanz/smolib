@@ -1,2 +1,2 @@
 from smolib.retry import retry
-from smolib import T
+from smolib import types as t

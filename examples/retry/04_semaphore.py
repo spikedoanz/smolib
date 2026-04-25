@@ -4,22 +4,22 @@ The permit is held only during the actual call, not during backoff sleep.
 This means other coroutines can use the permit while we're backing off.
 """
 import asyncio, random
-from smolib import retry, T
+from smolib import retry, t
 
 sem = asyncio.Semaphore(2)  # max 2 concurrent in-flight calls
 
-async def fetch(url: str) -> T.Attempt[str, str, str]:
+async def fetch(url: str) -> t.Attempt[str, str, str]:
     async with sem:
         # simulate a flaky network call
         await asyncio.sleep(random.uniform(0.1, 0.3))
         if random.random() < 0.5:
-            return T.Pending(f"timeout on {url}")
-        return T.Ok(f"body of {url}")
+            return t.Pending(f"timeout on {url}")
+        return t.Ok(f"body of {url}")
 
 async def fetch_with_retry(url: str):
-    result, attempts = await retry(lambda: fetch(url), n=5, wait=T.Wait.const(0.5))
+    result, attempts = await retry(lambda: fetch(url), n=5, wait=t.Wait.const(0.5))
     match result:
-        case T.Ok(value=body):
+        case t.Ok(value=body):
             print(f"  {url}: ok after {attempts.k} tries ({attempts.elapsed:.1f}s)")
         case _:
             print(f"  {url}: failed after {attempts.k} tries")

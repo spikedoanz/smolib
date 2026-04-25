@@ -1,8 +1,8 @@
 import pytest
 
-from smolib import T, retry
+from smolib import t, retry
 
-P, O, E, X = T.Pending, T.Ok, T.Err, T.Exhausted
+P, O, E, X = t.Pending, t.Ok, t.Err, t.Exhausted
 
 
 def scripted(outcomes):
@@ -116,18 +116,18 @@ async def test_invalid_n_validates_before_side_effects(n):
 
 
 def test_exp_backoff_caps_values():
-    wait = T.Wait.exp(base=2.0, cap=60.0)
+    wait = t.Wait.exp(base=2.0, cap=60.0)
     assert [wait(1), wait(2), wait(10)] == [2.0, 4.0, 60.0]
 
 
 def test_jitter_bounds():
-    wait = T.Wait.jitter(T.Wait.const(10))
+    wait = t.Wait.jitter(t.Wait.const(10))
     assert all(0 <= wait(1) <= 10 for _ in range(200))
 
 
 ELAPSED_CASES = [
-    pytest.param([P("pending"), O("done")], 3, T.Wait.const(2.5), O("done"), [2.5], id="ok"),
-    pytest.param([P("pending"), E("fatal")], 3, T.Wait.const(4.0), E("fatal"), [4.0], id="err"),
+    pytest.param([P("pending"), O("done")], 3, t.Wait.const(2.5), O("done"), [2.5], id="ok"),
+    pytest.param([P("pending"), E("fatal")], 3, t.Wait.const(4.0), E("fatal"), [4.0], id="err"),
     pytest.param(
         [P("attempt 1"), P("attempt 2"), P("attempt 3")],
         3,
