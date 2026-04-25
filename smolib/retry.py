@@ -32,19 +32,19 @@ def retry[R, E, T](
     Retry a potentially erroring | failing operation with backoff.
 
     ```
-    from smolib import retry, t
+    from smolib import retry, Ok, Pending, Exhausted, Err
 
-    def flaky() -> t.Attempt[str, str, int]:
-        if random.random() < 0.5: return t.Pending("not ready")
-        return t.Ok(42)
+    def flaky() -> Ok[int] | Pending[str] | Err[str]:
+        if random.random() < 0.5: return Pending("not ready")
+        return Ok(42)
 
     result, attempts = retry(flaky, n=5)
     match result:
-        case t.Ok(value=v):
+        case Ok(value=v):
             print(f"got {v} after {attempts.k} attempts in {attempts.elapsed:.1f}s")
-        case t.Exhausted():
+        case Exhausted():
             print(f"gave up after {attempts.k} tries: {attempts.reasons}")
-        case t.Err(error=e):
+        case Err(error=e):
             print(f"fatal error: {e}")
     ```
     """

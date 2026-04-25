@@ -1,8 +1,8 @@
 import pytest
 
-from smolib import t, retry, aretry
+from smolib import retry, aretry, Pending, Ok, Err, Exhausted, Wait
 
-P, O, E, X = t.Pending, t.Ok, t.Err, t.Exhausted
+P, O, E, X = Pending, Ok, Err, Exhausted
 
 
 def scripted(outcomes):
@@ -178,20 +178,20 @@ async def test_aretry_state_machine(
 # -- wait strategies --
 
 def test_exp_backoff_caps_values():
-    wait = t.Wait.exp(base=2.0, cap=60.0)
+    wait = Wait.exp(base=2.0, cap=60.0)
     assert [wait(1), wait(2), wait(10)] == [2.0, 4.0, 60.0]
 
 
 def test_jitter_bounds():
-    wait = t.Wait.jitter(t.Wait.const(10))
+    wait = Wait.jitter(Wait.const(10))
     assert all(0 <= wait(1) <= 10 for _ in range(200))
 
 
 # -- elapsed tracking --
 
 ELAPSED_CASES = [
-    pytest.param([P("pending"), O("done")], 3, t.Wait.const(2.5), O("done"), [2.5], id="ok"),
-    pytest.param([P("pending"), E("fatal")], 3, t.Wait.const(4.0), E("fatal"), [4.0], id="err"),
+    pytest.param([P("pending"), O("done")], 3, Wait.const(2.5), O("done"), [2.5], id="ok"),
+    pytest.param([P("pending"), E("fatal")], 3, Wait.const(4.0), E("fatal"), [4.0], id="err"),
     pytest.param(
         [P("attempt 1"), P("attempt 2"), P("attempt 3")],
         3,

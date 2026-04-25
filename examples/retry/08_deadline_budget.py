@@ -4,7 +4,7 @@ When your wait strategy is deterministic, you can compute the
 worst-case sleep budget upfront and pick n to fit your deadline.
 The bound is known at construction time, not discovered at runtime.
 """
-from smolib import t
+from smolib import Wait
 
 def max_n_for_deadline(deadline: float, wait: callable) -> int:
     """How many attempts fit in `deadline` seconds of sleep time?"""
@@ -21,9 +21,9 @@ def max_n_for_deadline(deadline: float, wait: callable) -> int:
 
 # --- examples ---
 
-exp = t.Wait.exp(base=2.0, cap=60.0)
-const = t.Wait.const(5.0)
-linear = t.Wait.linear(3.0)
+exp = Wait.exp(base=2.0, cap=60.0)
+const = Wait.const(5.0)
+linear = Wait.linear(3.0)
 
 for name, wait, deadline in [
     ("exp(2, cap=60)", exp, 30),
